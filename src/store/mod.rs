@@ -9,7 +9,7 @@
 //! for the consensus engine's data requirements.
 
 mod reth_store;
-mod tables;
+pub mod tables;
 mod wrapper;
 
 pub use reth_store::{RethStore, StoreError};

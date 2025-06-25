@@ -82,6 +82,11 @@ impl Store {
             .get_undecided_proposal(height, round, value_id)
             .await
     }
+
+    /// Verify that all consensus tables exist in the database
+    pub async fn verify_tables(&self) -> Result<()> {
+        self.inner.verify_tables().await
+    }
 }
 
 /// Internal trait to hide the generic parameter
@@ -109,6 +114,7 @@ trait StoreOps {
         round: Round,
         value_id: ValueIdWrapper,
     ) -> Result<Option<ProposedValue<MalachiteContext>>>;
+    async fn verify_tables(&self) -> Result<()>;
 }
 
 #[async_trait::async_trait]
@@ -164,5 +170,9 @@ where
         self.get_undecided_proposal(height, round, value_id)
             .await
             .map_err(Into::into)
+    }
+
+    async fn verify_tables(&self) -> Result<()> {
+        self.verify_tables().await.map_err(Into::into)
     }
 }

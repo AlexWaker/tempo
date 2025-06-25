@@ -415,6 +415,28 @@ where
     pub async fn contains_consensus_state(&self, key: &[u8]) -> bool {
         matches!(self.get_consensus_state(key).await, Ok(Some(_)))
     }
+
+    /// Verify that all consensus tables exist in the database
+    pub async fn verify_tables(&self) -> Result<(), StoreError> {
+        let provider = self.provider()?;
+        let tx = provider.tx_ref();
+
+        // Try to create cursors for each table to verify they exist
+        let _decided_values_cursor = tx
+            .cursor_read::<DecidedValues>()
+            .map_err(|e| StoreError::Other(format!("DecidedValues table not found: {e:?}")))?;
+
+        let _undecided_proposals_cursor = tx
+            .cursor_read::<UndecidedProposals>()
+            .map_err(|e| StoreError::Other(format!("UndecidedProposals table not found: {e:?}")))?;
+
+        let _consensus_state_cursor = tx
+            .cursor_read::<ConsensusState>()
+            .map_err(|e| StoreError::Other(format!("ConsensusState table not found: {e:?}")))?;
+
+        debug!("All consensus tables verified successfully");
+        Ok(())
+    }
 }
 
 #[cfg(test)]
