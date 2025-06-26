@@ -39,9 +39,22 @@ warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
+# Kill any reth-malachite processes
+kill_reth_processes() {
+    if pgrep -f "reth-malachite" > /dev/null; then
+        log "Stopping existing reth-malachite processes..."
+        pkill -f "reth-malachite" 2>/dev/null || true
+        sleep 2  # Give processes time to exit
+    fi
+}
+
 # Clean up function
 cleanup() {
     log "Cleaning up..."
+    
+    # Kill any existing reth-malachite processes
+    kill_reth_processes
+    
     if [ "$1" == "clean" ]; then
         log "Removing nodes directory..."
         rm -rf "$NODES_DIR"
@@ -70,6 +83,9 @@ if ! [[ "$NUM_NODES" =~ ^[0-9]+$ ]] || [ "$NUM_NODES" -lt 1 ] || [ "$NUM_NODES" 
 fi
 
 log "Starting $NUM_NODES node test network"
+
+# Check for and kill existing processes
+kill_reth_processes
 
 # Build the binary
 log "Building reth-malachite..."
@@ -109,11 +125,10 @@ for ((i=0; i<$NUM_NODES; i++)); do
     for ((j=0; j<$NUM_NODES; j++)); do
         if [ $j -ne $i ]; then
             PEER_PORT=$((CONSENSUS_PORT_BASE + j))
-            PEER_ID=$(cat "$NODES_DIR/node$j/malachite/config/node_id.txt")
             if [ -n "$PEERS" ]; then
                 PEERS="${PEERS},"
             fi
-            PEERS="${PEERS}${PEER_ID}@/ip4/127.0.0.1/tcp/${PEER_PORT}"
+            PEERS="${PEERS}\"/ip4/127.0.0.1/tcp/${PEER_PORT}\""
         fi
     done
     
