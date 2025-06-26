@@ -8,15 +8,27 @@ moniker = "node-${NODE_ID}"
 [consensus]
 # How long to wait before proposing a new block
 timeout_propose = "3s"
+timeout_propose_delta = "500ms"
 # How long to wait for prevotes
 timeout_prevote = "1s"
+timeout_prevote_delta = "500ms"
 # How long to wait for precommits
 timeout_precommit = "1s"
+timeout_precommit_delta = "500ms"
 # How long to wait before entering next round
 timeout_commit = "${BLOCK_TIME}"
 
 # Whether to skip timeout_commit if all signatures are collected
 skip_timeout_commit = true
+
+# Value payload type
+value_payload = "proposal-and-parts"
+
+# Queue capacity
+queue_capacity = 100
+
+# Timeout for rebroadcasting
+timeout_rebroadcast = "5s"
 
 # Consensus P2P configuration
 [consensus.p2p]
@@ -34,6 +46,12 @@ allow_duplicate_ip = true
 
 # Transport protocol
 transport = "tcp"
+
+# Maximum size for pubsub messages
+pubsub_max_size = "4.2 MB"
+
+# Maximum size for RPC messages
+rpc_max_size = "10.5 MB"
 
 [consensus.p2p.discovery]
 # Enable peer discovery
@@ -73,6 +91,9 @@ namespace = "malachite"
 
 # Runtime configuration
 [runtime]
+# Runtime flavor (single_threaded or multi_threaded)
+flavor = "single_threaded"
+
 # Number of worker threads for async runtime
 num_threads = 4
 
