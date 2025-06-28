@@ -34,14 +34,7 @@ check_block_height() {
     local response=$(curl -s -X POST http://127.0.0.1:$port \
         -H "Content-Type: application/json" \
         -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' 2>/dev/null || echo "")
-    
-    # Debug: log the response
-    if [ -n "$response" ]; then
-        >&2 echo "DEBUG: Response from port $port: $response"
-    else
-        >&2 echo "DEBUG: Empty response from port $port"
-    fi
-    
+
     if [ -n "$response" ] && echo "$response" | grep -q "result"; then
         local block_hex=$(echo "$response" | grep -o '"result":"0x[0-9a-fA-F]*"' | cut -d'"' -f4)
         if [ -n "$block_hex" ]; then
@@ -64,24 +57,24 @@ SPAWN_PID=$!
 # Cleanup function
 cleanup() {
     log "Cleaning up..."
-    
+
     # First, preserve logs before cleanup
     if [ -d "$TESTNET_DIR/logs" ]; then
         log "Preserving logs..."
         cp -r "$TESTNET_DIR/logs" "$TESTNET_DIR/logs.preserved" 2>/dev/null || true
     fi
-    
+
     if [ -n "$SPAWN_PID" ] && ps -p $SPAWN_PID > /dev/null 2>&1; then
         kill $SPAWN_PID 2>/dev/null || true
         wait $SPAWN_PID 2>/dev/null || true
     fi
-    
+
     # Clean up but don't remove logs
     if pgrep -f "reth-malachite" > /dev/null; then
         pkill -f "reth-malachite" 2>/dev/null || true
         sleep 2
     fi
-    
+
     # Restore logs if they were removed
     if [ -d "$TESTNET_DIR/logs.preserved" ] && [ ! -d "$TESTNET_DIR/logs" ]; then
         mv "$TESTNET_DIR/logs.preserved" "$TESTNET_DIR/logs"
@@ -122,12 +115,12 @@ all_rpc_ready=false
 while [ "$all_rpc_ready" = false ]; do
     current_time=$(date +%s)
     elapsed=$((current_time - rpc_start_time))
-    
+
     if [ $elapsed -gt $rpc_timeout ]; then
         error "RPC endpoints did not become available within $rpc_timeout seconds"
         exit 1
     fi
-    
+
     ready_count=0
     for i in $(seq 0 $((NUM_NODES - 1))); do
         port=$((8545 + i))
@@ -135,13 +128,13 @@ while [ "$all_rpc_ready" = false ]; do
         response=$(curl -s -X POST http://127.0.0.1:$port \
             -H "Content-Type: application/json" \
             -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' 2>/dev/null || echo "")
-        
+
         if [ -n "$response" ] && echo "$response" | grep -q "result"; then
             ready_count=$((ready_count + 1))
             log "Node $i RPC responding on port $port"
         fi
     done
-    
+
     if [ $ready_count -eq $NUM_NODES ]; then
         all_rpc_ready=true
         log "All $NUM_NODES RPC endpoints are ready"
@@ -160,13 +153,13 @@ last_max_height=0
 while true; do
     current_time=$(date +%s)
     elapsed=$((current_time - start_time))
-    
+
     # Check timeout
     if [ $elapsed -gt $TIMEOUT ]; then
         error "Timeout reached after $TIMEOUT seconds"
         exit 1
     fi
-    
+
     # Check if spawn process is still running
     if ! ps -p $SPAWN_PID > /dev/null 2>&1; then
         error "Network process died unexpectedly"
@@ -179,29 +172,29 @@ while true; do
         done
         exit 1
     fi
-    
+
     # Check all nodes
     all_reached=true
     min_height=999999
     max_height=0
     responsive_nodes=0
-    
+
     for i in $(seq 0 $((NUM_NODES - 1))); do
         port=$((8545 + i))
         height=$(check_block_height $port)
-        
+
         # Check if we got a valid response (height will be -1 if no response)
         if [ $height -ge 0 ]; then
             responsive_nodes=$((responsive_nodes + 1))
             printf "Node %d: block %3d | " "$i" "$height"
-            
+
             if [ $height -lt $min_height ]; then
                 min_height=$height
             fi
             if [ $height -gt $max_height ]; then
                 max_height=$height
             fi
-            
+
             if [ $height -lt $TARGET_BLOCK ]; then
                 all_reached=false
             fi
@@ -210,7 +203,7 @@ while true; do
             all_reached=false
         fi
     done
-    
+
     # Check if we're making progress
     if [ $max_height -gt $last_max_height ]; then
         last_progress_time=$current_time
@@ -223,9 +216,9 @@ while true; do
             exit 1
         fi
     fi
-    
+
     printf "Min: %d, Max: %d, Responsive: %d/%d\n" "$min_height" "$max_height" "$responsive_nodes" "$NUM_NODES"
-    
+
     # Check if all nodes reached target
     if [ "$all_reached" = true ] && [ $responsive_nodes -eq $NUM_NODES ]; then
         log "SUCCESS: All nodes reached block $TARGET_BLOCK"
@@ -236,7 +229,7 @@ while true; do
         fi
         exit 0
     fi
-    
+
     # Require at least one responsive node
     if [ $responsive_nodes -eq 0 ]; then
         error "No nodes are responding to RPC calls"
@@ -263,6 +256,6 @@ while true; do
         done
         exit 1
     fi
-    
+
     sleep 5
 done
