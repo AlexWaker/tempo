@@ -182,6 +182,7 @@ for ((i=0; i<$NUM_NODES; i++)); do
         --discovery.port $((RETH_PORT_BASE + i)) \
         --http \
         --http.port $((RETH_RPC_PORT_BASE + i)) \
+        --http.api eth,net,web3 \
         --authrpc.port $((AUTH_RPC_PORT_BASE + i)) \
         --metrics $((METRICS_PORT_BASE + i)) \
         --log.file.directory "$NODE_LOG_DIR" \
