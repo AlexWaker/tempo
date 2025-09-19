@@ -327,6 +327,63 @@ impl TIPFeeAMMError {
     pub const fn invalid_amount() -> Self {
         Self::InvalidAmount(ITIPFeeAMM::InvalidAmount {})
     }
+
+    /// Creates an error for token transfer failure.
+    pub const fn token_transfer_failed() -> Self {
+        Self::TokenTransferFailed(ITIPFeeAMM::TokenTransferFailed {})
+    }
+
+    /// Creates an error for invalid swap calculation.
+    pub const fn invalid_swap_calculation() -> Self {
+        Self::InvalidSwapCalculation(ITIPFeeAMM::InvalidSwapCalculation {})
+    }
+
+    /// Creates an error for insufficient liquidity for pending operations.
+    pub const fn insufficient_liquidity_for_pending() -> Self {
+        Self::InsufficientLiquidityForPending(ITIPFeeAMM::InsufficientLiquidityForPending {})
+    }
+
+    /// Creates an error for division by zero.
+    pub const fn division_by_zero() -> Self {
+        Self::DivisionByZero(ITIPFeeAMM::DivisionByZero {})
+    }
+
+    /// Creates an error for invalid new reserves.
+    pub const fn invalid_new_reserves() -> Self {
+        Self::InvalidNewReserves(ITIPFeeAMM::InvalidNewReserves {})
+    }
+
+    /// Creates an error for internal errors.
+    pub const fn internal_error() -> Self {
+        Self::InternalError(ITIPFeeAMM::InternalError {})
+    }
+}
+
+impl FeeManagerError {
+    /// Creates an error for invalid token.
+    pub const fn invalid_token() -> Self {
+        Self::InvalidToken(IFeeManager::InvalidToken {})
+    }
+
+    /// Creates an error for internal errors.
+    pub const fn internal_error() -> Self {
+        Self::InternalError(IFeeManager::InternalError {})
+    }
+
+    /// Creates an error for insufficient liquidity.
+    pub const fn insufficient_liquidity() -> Self {
+        Self::InsufficientLiquidity(IFeeManager::InsufficientLiquidity {})
+    }
+
+    /// Creates an error for insufficient fee token balance.
+    pub const fn insufficient_fee_token_balance() -> Self {
+        Self::InsufficientFeeTokenBalance(IFeeManager::InsufficientFeeTokenBalance {})
+    }
+
+    /// Creates an error for only system contract access.
+    pub const fn only_system_contract() -> Self {
+        Self::OnlySystemContract(IFeeManager::OnlySystemContract {})
+    }
 }
 
 impl TIP20Error {
