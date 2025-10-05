@@ -6,9 +6,8 @@ use alloy::{
 };
 use clap::Parser;
 use eyre::Context;
-use futures::StreamExt;
 use itertools::Itertools;
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 use tempo_precompiles::{
     TIP_FEE_MANAGER_ADDRESS, TIP20_FACTORY_ADDRESS,
     contracts::{
@@ -23,14 +22,17 @@ use tracing::{debug, error, info, instrument};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct SimpleArbArgs {
+    /// RPC endpoint for the node
     #[arg(short, long, required = true)]
     rpc_url: String,
 
+    /// Private key of the tx sender
     #[arg(short, long, required = true)]
     private_key: String,
 
-    #[arg(long, default_value_t = 200)]
-    poll_interval_ms: u64,
+    /// Interval between checking pools for rebalancing. This should be set to the block time.
+    #[arg(long, default_value_t = 2)]
+    poll_interval: u64,
 }
 
 #[instrument(skip(provider))]
@@ -111,10 +113,10 @@ impl SimpleArbArgs {
             }
         }
 
-        info!("Listening for new blocks...");
-        let mut watcher = provider.watch_blocks().await?.into_stream();
-        while watcher.next().await.is_some() {
-            debug!("New block received, checking pools for rebalancing");
+        // NOTE: currently this is a very simple approach that checks all pools every `n`
+        // milliseconds. While this should ensure pools are always balanced within a few blocks,
+        // this can be updated to listen to events and only rebalance pools that have been swapped.
+        loop {
             for pair in pairs.iter() {
                 // Get current pool state
                 let pool = fee_amm
@@ -125,8 +127,10 @@ impl SimpleArbArgs {
                         format!("failed to fetch pool for tokens {:?}, {:?}", pair.0, pair.1)
                     })?;
 
-                if pool.reserveUserToken > 0
-                    && let Err(e) = fee_amm
+                if pool.reserveUserToken > 0 {
+                    let mut pending_txs = vec![];
+
+                    match fee_amm
                         .rebalanceSwap(
                             pair.0,
                             pair.1,
@@ -135,18 +139,46 @@ impl SimpleArbArgs {
                         )
                         .send()
                         .await
-                {
-                    error!(
-                        token_a = %pair.0,
-                        token_b = %pair.1,
-                        amount = %pool.reserveUserToken,
-                        err = error_field(&e),
-                        "Failed to send rebalance transaction"
-                    );
+                    {
+                        Ok(tx) => {
+                            pending_txs.push(tx);
+                        }
+
+                        Err(e) => {
+                            error!(
+                                token_a = %pair.0,
+                                token_b = %pair.1,
+                                amount = %pool.reserveUserToken,
+                                err = error_field(&e),
+                                "Failed to send rebalance transaction"
+                            );
+                        }
+                    }
+
+                    // Await all receipts with timeout
+                    for tx in pending_txs {
+                        match tokio::time::timeout(
+                            Duration::from_secs(self.poll_interval * 2),
+                            tx.get_receipt(),
+                        )
+                        .await
+                        {
+                            Ok(Ok(_)) => {
+                                debug!("Tx receipt received successfully");
+                            }
+                            Ok(Err(e)) => {
+                                error!(err = error_field(&e), "Failed to get tx receipt");
+                            }
+                            Err(_) => {
+                                error!("Timeout waiting for tx receipt");
+                            }
+                        }
+                    }
                 }
             }
-        }
 
-        Ok(())
+            tokio::time::sleep(Duration::from_secs(self.poll_interval)).await;
+            debug!("Polling interval elapsed, checking pools for rebalancing");
+        }
     }
 }
