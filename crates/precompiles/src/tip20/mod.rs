@@ -7,6 +7,7 @@ pub use tempo_contracts::precompiles::{
 
 use crate::{
     LINKING_USD_ADDRESS, TIP_FEE_MANAGER_ADDRESS,
+    error::TempoPrecompileError,
     storage::{
         PrecompileStorageProvider,
         slots::{double_mapping_slot, mapping_slot},
@@ -91,96 +92,85 @@ pub static ISSUER_ROLE: LazyLock<B256> = LazyLock::new(|| keccak256(b"ISSUER_ROL
 pub static BURN_BLOCKED_ROLE: LazyLock<B256> = LazyLock::new(|| keccak256(b"BURN_BLOCKED_ROLE"));
 
 impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
-    pub fn name(&mut self) -> String {
+    pub fn name(&mut self) -> Result<String, TempoPrecompileError> {
         self.read_string(slots::NAME)
     }
 
-    pub fn symbol(&mut self) -> String {
+    pub fn symbol(&mut self) -> Result<String, TempoPrecompileError> {
         self.read_string(slots::SYMBOL)
     }
 
-    pub fn decimals(&mut self) -> u8 {
-        TIP4217Registry::default().get_currency_decimals(
-            ITIP4217Registry::getCurrencyDecimalsCall {
-                currency: self.currency(),
-            },
-        )
+    pub fn decimals(&mut self) -> Result<u8, TempoPrecompileError> {
+        let currency = self.currency()?;
+        Ok(TIP4217Registry::default()
+            .get_currency_decimals(ITIP4217Registry::getCurrencyDecimalsCall { currency }))
     }
 
-    pub fn currency(&mut self) -> String {
+    pub fn currency(&mut self) -> Result<String, TempoPrecompileError> {
         self.read_string(slots::CURRENCY)
     }
 
-    pub fn total_supply(&mut self) -> U256 {
-        self.storage
-            .sload(self.token_address, slots::TOTAL_SUPPLY)
-            .expect("TODO: handle error")
+    pub fn total_supply(&mut self) -> Result<U256, TempoPrecompileError> {
+        self.storage.sload(self.token_address, slots::TOTAL_SUPPLY)
     }
 
-    pub fn quote_token(&mut self) -> Address {
-        self.storage
-            .sload(self.token_address, slots::QUOTE_TOKEN)
-            .expect("TODO: handle error")
-            .into_address()
+    pub fn quote_token(&mut self) -> Result<Address, TempoPrecompileError> {
+        Ok(self
+            .storage
+            .sload(self.token_address, slots::QUOTE_TOKEN)?
+            .into_address())
     }
 
-    pub fn next_quote_token(&mut self) -> Address {
-        self.storage
-            .sload(self.token_address, slots::NEXT_QUOTE_TOKEN)
-            .expect("TODO: handle error")
-            .into_address()
+    pub fn next_quote_token(&mut self) -> Result<Address, TempoPrecompileError> {
+        Ok(self
+            .storage
+            .sload(self.token_address, slots::NEXT_QUOTE_TOKEN)?
+            .into_address())
     }
 
-    pub fn supply_cap(&mut self) -> U256 {
-        self.storage
-            .sload(self.token_address, slots::SUPPLY_CAP)
-            .expect("TODO: handle error")
+    pub fn supply_cap(&mut self) -> Result<U256, TempoPrecompileError> {
+        self.storage.sload(self.token_address, slots::SUPPLY_CAP)
     }
 
-    pub fn paused(&mut self) -> bool {
-        self.storage
-            .sload(self.token_address, slots::PAUSED)
-            .expect("TODO: handle error")
-            != U256::ZERO
+    pub fn paused(&mut self) -> Result<bool, TempoPrecompileError> {
+        Ok(self.storage.sload(self.token_address, slots::PAUSED)? != U256::ZERO)
     }
 
-    pub fn transfer_policy_id(&mut self) -> u64 {
-        self.storage
-            .sload(self.token_address, slots::TRANSFER_POLICY_ID)
-            .expect("TODO: handle error")
-            .to::<u64>()
+    pub fn transfer_policy_id(&mut self) -> Result<u64, TempoPrecompileError> {
+        Ok(self
+            .storage
+            .sload(self.token_address, slots::TRANSFER_POLICY_ID)?
+            .to::<u64>())
     }
 
-    pub fn domain_separator(&mut self) -> B256 {
-        B256::from(
+    pub fn domain_separator(&mut self) -> Result<B256, TempoPrecompileError> {
+        Ok(B256::from(
             self.storage
-                .sload(self.token_address, slots::DOMAIN_SEPARATOR)
-                .expect("TODO: handle error"),
-        )
+                .sload(self.token_address, slots::DOMAIN_SEPARATOR)?,
+        ))
     }
 
     // View functions
-    pub fn balance_of(&mut self, call: ITIP20::balanceOfCall) -> U256 {
+    pub fn balance_of(
+        &mut self,
+        call: ITIP20::balanceOfCall,
+    ) -> Result<U256, TempoPrecompileError> {
         self.get_balance(&call.account)
     }
 
-    pub fn allowance(&mut self, call: ITIP20::allowanceCall) -> U256 {
+    pub fn allowance(&mut self, call: ITIP20::allowanceCall) -> Result<U256, TempoPrecompileError> {
         self.get_allowance(&call.owner, &call.spender)
     }
 
-    pub fn nonces(&mut self, call: ITIP20::noncesCall) -> U256 {
+    pub fn nonces(&mut self, call: ITIP20::noncesCall) -> Result<U256, TempoPrecompileError> {
         let slot = mapping_slot(call.owner, slots::NONCES);
-        self.storage
-            .sload(self.token_address, slot)
-            .expect("TODO: handle error")
+        self.storage.sload(self.token_address, slot)
     }
 
-    pub fn salts(&mut self, call: ITIP20::saltsCall) -> bool {
+    pub fn salts(&mut self, call: ITIP20::saltsCall) -> Result<bool, TempoPrecompileError> {
         let slot = double_mapping_slot(call.owner, call.salt, slots::SALTS);
-        self.storage
-            .sload(self.token_address, slot)
-            .expect("TODO: handle error")
-            != U256::ZERO
+        let val = self.storage.sload(self.token_address, slot)?;
+        Ok(!val.is_zero())
     }
 
     // Admin functions
@@ -188,189 +178,166 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         msg_sender: &Address,
         call: ITIP20::changeTransferPolicyIdCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         self.check_role(msg_sender, DEFAULT_ADMIN_ROLE)?;
-        self.storage
-            .sstore(
-                self.token_address,
-                slots::TRANSFER_POLICY_ID,
-                U256::from(call.newPolicyId),
-            )
-            .expect("TODO: handle error");
+        self.storage.sstore(
+            self.token_address,
+            slots::TRANSFER_POLICY_ID,
+            U256::from(call.newPolicyId),
+        )?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::TransferPolicyUpdate(ITIP20::TransferPolicyUpdate {
-                    updater: *msg_sender,
-                    newPolicyId: call.newPolicyId,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::TransferPolicyUpdate(ITIP20::TransferPolicyUpdate {
+                updater: *msg_sender,
+                newPolicyId: call.newPolicyId,
+            })
+            .into_log_data(),
+        )
     }
 
     pub fn set_supply_cap(
         &mut self,
         msg_sender: &Address,
         call: ITIP20::setSupplyCapCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         self.check_role(msg_sender, DEFAULT_ADMIN_ROLE)?;
-        if call.newSupplyCap < self.total_supply() {
-            return Err(TIP20Error::supply_cap_exceeded());
+        if call.newSupplyCap < self.total_supply()? {
+            return Err(TIP20Error::supply_cap_exceeded().into());
         }
         self.storage
-            .sstore(self.token_address, slots::SUPPLY_CAP, call.newSupplyCap)
-            .expect("TODO: handle error");
+            .sstore(self.token_address, slots::SUPPLY_CAP, call.newSupplyCap)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::SupplyCapUpdate(ITIP20::SupplyCapUpdate {
-                    updater: *msg_sender,
-                    newSupplyCap: call.newSupplyCap,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::SupplyCapUpdate(ITIP20::SupplyCapUpdate {
+                updater: *msg_sender,
+                newSupplyCap: call.newSupplyCap,
+            })
+            .into_log_data(),
+        )
     }
 
     pub fn pause(
         &mut self,
         msg_sender: &Address,
         _call: ITIP20::pauseCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         self.check_role(msg_sender, *PAUSE_ROLE)?;
         self.storage
-            .sstore(self.token_address, slots::PAUSED, U256::ONE)
-            .expect("TODO: handle error");
+            .sstore(self.token_address, slots::PAUSED, U256::ONE)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::PauseStateUpdate(ITIP20::PauseStateUpdate {
-                    updater: *msg_sender,
-                    isPaused: true,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::PauseStateUpdate(ITIP20::PauseStateUpdate {
+                updater: *msg_sender,
+                isPaused: true,
+            })
+            .into_log_data(),
+        )
     }
 
     pub fn unpause(
         &mut self,
         msg_sender: &Address,
         _call: ITIP20::unpauseCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         self.check_role(msg_sender, *UNPAUSE_ROLE)?;
         self.storage
-            .sstore(self.token_address, slots::PAUSED, U256::ZERO)
-            .expect("TODO: handle error");
+            .sstore(self.token_address, slots::PAUSED, U256::ZERO)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::PauseStateUpdate(ITIP20::PauseStateUpdate {
-                    updater: *msg_sender,
-                    isPaused: false,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::PauseStateUpdate(ITIP20::PauseStateUpdate {
+                updater: *msg_sender,
+                isPaused: false,
+            })
+            .into_log_data(),
+        )
     }
 
     pub fn update_quote_token(
         &mut self,
         msg_sender: &Address,
         call: ITIP20::updateQuoteTokenCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         self.check_role(msg_sender, DEFAULT_ADMIN_ROLE)?;
 
         // Verify the new quote token is a valid TIP20 token that has been deployed
         if !is_tip20(&call.newQuoteToken) {
-            return Err(TIP20Error::invalid_quote_token());
+            return Err(TIP20Error::invalid_quote_token().into());
         }
 
         let new_token_id = address_to_token_id_unchecked(&call.newQuoteToken);
         let factory_token_id_counter = TIP20Factory::new(self.storage)
-            .token_id_counter()
+            .token_id_counter()?
             .to::<u64>();
 
         // Ensure the quote token has been deployed (token_id < counter)
         if new_token_id >= factory_token_id_counter {
-            return Err(TIP20Error::invalid_quote_token());
+            return Err(TIP20Error::invalid_quote_token().into());
         }
 
-        self.storage
-            .sstore(
-                self.token_address,
-                slots::NEXT_QUOTE_TOKEN,
-                call.newQuoteToken.into_u256(),
-            )
-            .expect("TODO: handle error");
+        self.storage.sstore(
+            self.token_address,
+            slots::NEXT_QUOTE_TOKEN,
+            call.newQuoteToken.into_u256(),
+        )?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::UpdateQuoteToken(ITIP20::UpdateQuoteToken {
-                    updater: *msg_sender,
-                    newQuoteToken: call.newQuoteToken,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::UpdateQuoteToken(ITIP20::UpdateQuoteToken {
+                updater: *msg_sender,
+                newQuoteToken: call.newQuoteToken,
+            })
+            .into_log_data(),
+        )
     }
 
     pub fn finalize_quote_token_update(
         &mut self,
         msg_sender: &Address,
         _call: ITIP20::finalizeQuoteTokenUpdateCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         self.check_role(msg_sender, DEFAULT_ADMIN_ROLE)?;
 
-        let next_quote_token = self.next_quote_token();
+        let next_quote_token = self.next_quote_token()?;
 
         // Check that this does not create a loop
         // Loop through quote tokens until we reach the root (LinkingUSD)
         let mut current = next_quote_token;
         while current != LINKING_USD_ADDRESS {
             if current == self.token_address {
-                return Err(TIP20Error::invalid_quote_token());
+                return Err(TIP20Error::invalid_quote_token().into());
             }
 
-            current = TIP20Token::from_address(current, self.storage).quote_token();
+            current = TIP20Token::from_address(current, self.storage).quote_token()?;
         }
 
         // Update the quote token
-        self.storage
-            .sstore(
-                self.token_address,
-                slots::QUOTE_TOKEN,
-                next_quote_token.into_u256(),
-            )
-            .expect("TODO: handle error");
+        self.storage.sstore(
+            self.token_address,
+            slots::QUOTE_TOKEN,
+            next_quote_token.into_u256(),
+        )?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::QuoteTokenUpdateFinalized(ITIP20::QuoteTokenUpdateFinalized {
-                    updater: *msg_sender,
-                    newQuoteToken: next_quote_token,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::QuoteTokenUpdateFinalized(ITIP20::QuoteTokenUpdateFinalized {
+                updater: *msg_sender,
+                newQuoteToken: next_quote_token,
+            })
+            .into_log_data(),
+        )
     }
 
     // Token operations
     /// Mints new tokens to specified address
-    pub fn mint(&mut self, msg_sender: &Address, call: ITIP20::mintCall) -> Result<(), TIP20Error> {
+    pub fn mint(
+        &mut self,
+        msg_sender: &Address,
+        call: ITIP20::mintCall,
+    ) -> Result<(), TempoPrecompileError> {
         self._mint(msg_sender, call.to, call.amount)
     }
 
@@ -379,71 +346,70 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         msg_sender: &Address,
         call: ITIP20::mintWithMemoCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         self._mint(msg_sender, call.to, call.amount)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::TransferWithMemo(ITIP20::TransferWithMemo {
-                    from: *msg_sender,
-                    to: call.to,
-                    amount: call.amount,
-                    memo: call.memo,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::TransferWithMemo(ITIP20::TransferWithMemo {
+                from: *msg_sender,
+                to: call.to,
+                amount: call.amount,
+                memo: call.memo,
+            })
+            .into_log_data(),
+        )
     }
 
     /// Internal helper to mint new tokens and update balances
-    fn _mint(&mut self, msg_sender: &Address, to: Address, amount: U256) -> Result<(), TIP20Error> {
+    fn _mint(
+        &mut self,
+        msg_sender: &Address,
+        to: Address,
+        amount: U256,
+    ) -> Result<(), TempoPrecompileError> {
         self.check_role(msg_sender, *ISSUER_ROLE)?;
-        let total_supply = self.total_supply();
+        let total_supply = self.total_supply()?;
 
         let new_supply = total_supply
             .checked_add(amount)
             .ok_or(TIP20Error::supply_cap_exceeded())?;
 
-        let supply_cap = self.supply_cap();
+        let supply_cap = self.supply_cap()?;
         if new_supply > supply_cap {
-            return Err(TIP20Error::supply_cap_exceeded());
+            return Err(TIP20Error::supply_cap_exceeded().into());
         }
 
-        self.set_total_supply(new_supply);
+        self.set_total_supply(new_supply)?;
 
-        let to_balance = self.get_balance(&to);
+        let to_balance = self.get_balance(&to)?;
         let new_to_balance: alloy::primitives::Uint<256, 4> = to_balance
             .checked_add(amount)
             .ok_or(TIP20Error::supply_cap_exceeded())?;
-        self.set_balance(&to, new_to_balance);
+        self.set_balance(&to, new_to_balance)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::Transfer(ITIP20::Transfer {
-                    from: Address::ZERO,
-                    to,
-                    amount,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::Transfer(ITIP20::Transfer {
+                from: Address::ZERO,
+                to,
+                amount,
+            })
+            .into_log_data(),
+        )?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::Mint(ITIP20::Mint { to, amount }).into_log_data(),
-            )
-            .expect("TODO: handle error");
-
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::Mint(ITIP20::Mint { to, amount }).into_log_data(),
+        )
     }
 
     /// Burns tokens from sender's balance and reduces total supply
-    pub fn burn(&mut self, msg_sender: &Address, call: ITIP20::burnCall) -> Result<(), TIP20Error> {
+    pub fn burn(
+        &mut self,
+        msg_sender: &Address,
+        call: ITIP20::burnCall,
+    ) -> Result<(), TempoPrecompileError> {
         self._burn(msg_sender, call.amount)
     }
 
@@ -452,23 +418,19 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         msg_sender: &Address,
         call: ITIP20::burnWithMemoCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         self._burn(msg_sender, call.amount)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::TransferWithMemo(ITIP20::TransferWithMemo {
-                    from: *msg_sender,
-                    to: Address::ZERO,
-                    amount: call.amount,
-                    memo: call.memo,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::TransferWithMemo(ITIP20::TransferWithMemo {
+                from: *msg_sender,
+                to: Address::ZERO,
+                amount: call.amount,
+                memo: call.memo,
+            })
+            .into_log_data(),
+        )
     }
 
     /// Burns tokens from blocked addresses that cannot transfer
@@ -476,65 +438,57 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         msg_sender: &Address,
         call: ITIP20::burnBlockedCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         self.check_role(msg_sender, *BURN_BLOCKED_ROLE)?;
 
         // Check if the address is blocked from transferring
-        let transfer_policy_id = self.transfer_policy_id();
+        let transfer_policy_id = self.transfer_policy_id()?;
         let mut registry = TIP403Registry::new(self.storage);
         if registry.is_authorized(ITIP403Registry::isAuthorizedCall {
             policyId: transfer_policy_id,
             user: call.from,
-        }) {
+        })? {
             // Only allow burning from addresses that are blocked from transferring
-            return Err(TIP20Error::policy_forbids());
+            return Err(TIP20Error::policy_forbids().into());
         }
 
         self._transfer(&call.from, &Address::ZERO, call.amount)?;
 
-        let total_supply = self.total_supply();
+        let total_supply = self.total_supply()?;
         let new_supply = total_supply
             .checked_sub(call.amount)
             .ok_or(TIP20Error::insufficient_balance())?;
-        self.set_total_supply(new_supply);
+        self.set_total_supply(new_supply)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::BurnBlocked(ITIP20::BurnBlocked {
-                    from: call.from,
-                    amount: call.amount,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::BurnBlocked(ITIP20::BurnBlocked {
+                from: call.from,
+                amount: call.amount,
+            })
+            .into_log_data(),
+        )
     }
 
-    fn _burn(&mut self, msg_sender: &Address, amount: U256) -> Result<(), TIP20Error> {
+    fn _burn(&mut self, msg_sender: &Address, amount: U256) -> Result<(), TempoPrecompileError> {
         self.check_role(msg_sender, *ISSUER_ROLE)?;
 
         self._transfer(msg_sender, &Address::ZERO, amount)?;
 
-        let total_supply = self.total_supply();
+        let total_supply = self.total_supply()?;
         let new_supply = total_supply
             .checked_sub(amount)
             .ok_or(TIP20Error::insufficient_balance())?;
-        self.set_total_supply(new_supply);
+        self.set_total_supply(new_supply)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::Burn(ITIP20::Burn {
-                    from: *msg_sender,
-                    amount,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::Burn(ITIP20::Burn {
+                from: *msg_sender,
+                amount,
+            })
+            .into_log_data(),
+        )
     }
 
     // Standard token functions
@@ -542,20 +496,18 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         msg_sender: &Address,
         call: ITIP20::approveCall,
-    ) -> Result<bool, TIP20Error> {
-        self.set_allowance(msg_sender, &call.spender, call.amount);
+    ) -> Result<bool, TempoPrecompileError> {
+        self.set_allowance(msg_sender, &call.spender, call.amount)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::Approval(ITIP20::Approval {
-                    owner: *msg_sender,
-                    spender: call.spender,
-                    amount: call.amount,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::Approval(ITIP20::Approval {
+                owner: *msg_sender,
+                spender: call.spender,
+                amount: call.amount,
+            })
+            .into_log_data(),
+        )?;
 
         Ok(true)
     }
@@ -564,7 +516,7 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         msg_sender: &Address,
         call: ITIP20::transferCall,
-    ) -> Result<bool, TIP20Error> {
+    ) -> Result<bool, TempoPrecompileError> {
         trace!(%msg_sender, ?call, "transferring TIP20");
         self.check_not_paused()?;
         self.check_not_token_address(&call.to)?;
@@ -577,7 +529,7 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         msg_sender: &Address,
         call: ITIP20::transferFromCall,
-    ) -> Result<bool, TIP20Error> {
+    ) -> Result<bool, TempoPrecompileError> {
         self._transfer_from(msg_sender, call.from, call.to, call.amount)
     }
 
@@ -586,21 +538,19 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         msg_sender: &Address,
         call: ITIP20::transferFromWithMemoCall,
-    ) -> Result<bool, TIP20Error> {
+    ) -> Result<bool, TempoPrecompileError> {
         self._transfer_from(msg_sender, call.from, call.to, call.amount)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::TransferWithMemo(ITIP20::TransferWithMemo {
-                    from: *msg_sender,
-                    to: call.to,
-                    amount: call.amount,
-                    memo: call.memo,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::TransferWithMemo(ITIP20::TransferWithMemo {
+                from: *msg_sender,
+                to: call.to,
+                amount: call.amount,
+                memo: call.memo,
+            })
+            .into_log_data(),
+        )?;
 
         Ok(true)
     }
@@ -612,7 +562,7 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         from: Address,
         to: Address,
         amount: U256,
-    ) -> Result<bool, TIP20Error> {
+    ) -> Result<bool, TempoPrecompileError> {
         self.check_not_paused()?;
         self.check_not_token_address(&to)?;
         self.ensure_transfer_authorized(&from, &to)?;
@@ -628,21 +578,21 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         from: Address,
         to: Address,
         amount: U256,
-    ) -> Result<bool, TIP20Error> {
+    ) -> Result<bool, TempoPrecompileError> {
         self.check_not_paused()?;
         self.check_not_token_address(&to)?;
         self.ensure_transfer_authorized(&from, &to)?;
 
-        let allowed = self.get_allowance(&from, msg_sender);
+        let allowed = self.get_allowance(&from, msg_sender)?;
         if amount > allowed {
-            return Err(TIP20Error::insufficient_allowance());
+            return Err(TIP20Error::insufficient_allowance().into());
         }
 
         if allowed != U256::MAX {
             let new_allowance = allowed
                 .checked_sub(amount)
                 .ok_or(TIP20Error::insufficient_allowance())?;
-            self.set_allowance(&from, msg_sender, new_allowance);
+            self.set_allowance(&from, msg_sender, new_allowance)?;
         }
 
         self._transfer(&from, &to, amount)?;
@@ -654,17 +604,14 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         _msg_sender: &Address,
         call: ITIP20::permitCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         if U256::from(call.deadline) < self.storage.timestamp() {
-            return Err(TIP20Error::expired());
+            return Err(TIP20Error::expired().into());
         }
 
         // Get current nonce (increment after successful verification)
         let nonce_slot = mapping_slot(call.owner, slots::NONCES);
-        let nonce = self
-            .storage
-            .sload(self.token_address, nonce_slot)
-            .expect("TODO: handle error");
+        let nonce = self.storage.sload(self.token_address, nonce_slot)?;
 
         // Recover address from signature
         let recovered_addr = {
@@ -674,45 +621,40 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
                 call.value,
                 nonce,
                 U256::from(call.deadline),
-            );
+            )?;
 
             let v_norm = if call.v >= 27 { call.v - 27 } else { call.v };
             if v_norm > 1 {
-                return Err(TIP20Error::invalid_signature());
+                return Err(TIP20Error::invalid_signature().into());
             }
 
             eth_secp256k1::recover_signer(
                 &EthSignature::from_scalars_and_parity(call.r, call.s, v_norm == 1),
                 digest,
             )
-            .map_err(|_| TIP20Error::invalid_signature())?
+            .map_err(|_| TempoPrecompileError::from(TIP20Error::invalid_signature()))?
         };
 
         // Verify recovered address matches owner
         if recovered_addr != call.owner {
-            return Err(TIP20Error::invalid_signature());
+            return Err(TIP20Error::invalid_signature().into());
         }
 
         // Increment nonce after successful verification
         self.storage
-            .sstore(self.token_address, nonce_slot, nonce + U256::ONE)
-            .expect("TODO: handle error");
+            .sstore(self.token_address, nonce_slot, nonce + U256::ONE)?;
 
-        self.set_allowance(&call.owner, &call.spender, call.value);
+        self.set_allowance(&call.owner, &call.spender, call.value)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::Approval(ITIP20::Approval {
-                    owner: call.owner,
-                    spender: call.spender,
-                    amount: call.value,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::Approval(ITIP20::Approval {
+                owner: call.owner,
+                spender: call.spender,
+                amount: call.value,
+            })
+            .into_log_data(),
+        )
     }
 
     // TIP20 extension functions
@@ -720,27 +662,23 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         msg_sender: &Address,
         call: ITIP20::transferWithMemoCall,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         self.check_not_paused()?;
         self.check_not_token_address(&call.to)?;
         self.ensure_transfer_authorized(msg_sender, &call.to)?;
 
         self._transfer(msg_sender, &call.to, call.amount)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::TransferWithMemo(ITIP20::TransferWithMemo {
-                    from: *msg_sender,
-                    to: call.to,
-                    amount: call.amount,
-                    memo: call.memo,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::TransferWithMemo(ITIP20::TransferWithMemo {
+                from: *msg_sender,
+                to: call.to,
+                amount: call.amount,
+                memo: call.memo,
+            })
+            .into_log_data(),
+        )
     }
 }
 
@@ -769,53 +707,45 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         currency: &str,
         quote_token: Address,
         admin: &Address,
-    ) -> Result<(), TIP20Error> {
+    ) -> Result<(), TempoPrecompileError> {
         trace!(%name, address=%self.token_address, "Initializing token");
 
         // must ensure the account is not empty, by setting some code
-        self.storage
-            .set_code(
-                self.token_address,
-                Bytecode::new_legacy(Bytes::from_static(&[0xef])),
-            )
-            .expect("TODO: handle error");
+        self.storage.set_code(
+            self.token_address,
+            Bytecode::new_legacy(Bytes::from_static(&[0xef])),
+        )?;
 
         self.write_string(slots::NAME, name.to_string())?;
         self.write_string(slots::SYMBOL, symbol.to_string())?;
         self.write_string(slots::CURRENCY, currency.to_string())?;
-        self.storage
-            .sstore(
-                self.token_address,
-                slots::QUOTE_TOKEN,
-                quote_token.into_u256(),
-            )
-            .expect("TODO: handle error");
+        self.storage.sstore(
+            self.token_address,
+            slots::QUOTE_TOKEN,
+            quote_token.into_u256(),
+        )?;
         // Initialize nextQuoteToken to the same value as quoteToken
-        self.storage
-            .sstore(
-                self.token_address,
-                slots::NEXT_QUOTE_TOKEN,
-                quote_token.into_u256(),
-            )
-            .expect("TODO: handle error");
+        self.storage.sstore(
+            self.token_address,
+            slots::NEXT_QUOTE_TOKEN,
+            quote_token.into_u256(),
+        )?;
 
         // Validate currency via TIP4217 registry
-        if self.decimals() == 0 {
-            return Err(TIP20Error::invalid_currency());
+        if self.decimals()? == 0 {
+            return Err(TIP20Error::invalid_currency().into());
         }
 
         // Set default values
         self.storage
-            .sstore(self.token_address, slots::SUPPLY_CAP, U256::MAX)
-            .expect("TODO: handle error");
+            .sstore(self.token_address, slots::SUPPLY_CAP, U256::MAX)?;
         self.storage
-            .sstore(self.token_address, slots::TRANSFER_POLICY_ID, U256::ONE)
-            .expect("TODO: handle error"); // Default "always-allow" policy
+            .sstore(self.token_address, slots::TRANSFER_POLICY_ID, U256::ONE)?;
 
         // Initialize roles system and grant admin role
         let mut roles = self.get_roles_contract();
-        roles.initialize();
-        roles.grant_default_admin(admin);
+        roles.initialize()?;
+        roles.grant_default_admin(admin)?;
 
         // Calculate DOMAIN_SEPARATOR
         let mut domain_data = Vec::new();
@@ -827,15 +757,11 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         domain_data.extend_from_slice(&U256::from(self.storage.chain_id()).to_be_bytes::<32>());
         domain_data.extend_from_slice(self.token_address.as_slice());
         let domain_separator = keccak256(&domain_data);
-        self.storage
-            .sstore(
-                self.token_address,
-                slots::DOMAIN_SEPARATOR,
-                U256::from_be_bytes(domain_separator.0),
-            )
-            .expect("TODO: handle error");
-
-        Ok(())
+        self.storage.sstore(
+            self.token_address,
+            slots::DOMAIN_SEPARATOR,
+            U256::from_be_bytes(domain_separator.0),
+        )
     }
 
     // Helper to get a RolesAuthContract instance
@@ -848,55 +774,61 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         )
     }
 
-    fn get_balance(&mut self, account: &Address) -> U256 {
+    fn get_balance(&mut self, account: &Address) -> Result<U256, TempoPrecompileError> {
         let slot = mapping_slot(account, slots::BALANCES);
-        self.storage
-            .sload(self.token_address, slot)
-            .expect("TODO: handle error")
+        self.storage.sload(self.token_address, slot)
     }
 
-    fn set_balance(&mut self, account: &Address, amount: U256) {
+    fn set_balance(&mut self, account: &Address, amount: U256) -> Result<(), TempoPrecompileError> {
         let slot = mapping_slot(account, slots::BALANCES);
-        self.storage
-            .sstore(self.token_address, slot, amount)
-            .expect("TODO: handle error");
+        self.storage.sstore(self.token_address, slot, amount)
     }
 
-    fn get_allowance(&mut self, owner: &Address, spender: &Address) -> U256 {
+    fn get_allowance(
+        &mut self,
+        owner: &Address,
+        spender: &Address,
+    ) -> Result<U256, TempoPrecompileError> {
         let slot = double_mapping_slot(owner, spender, slots::ALLOWANCES);
-        self.storage
-            .sload(self.token_address, slot)
-            .expect("TODO: handle error")
+        self.storage.sload(self.token_address, slot)
     }
 
-    fn set_allowance(&mut self, owner: &Address, spender: &Address, amount: U256) {
+    fn set_allowance(
+        &mut self,
+        owner: &Address,
+        spender: &Address,
+        amount: U256,
+    ) -> Result<(), TempoPrecompileError> {
         let slot = double_mapping_slot(owner, spender, slots::ALLOWANCES);
-        self.storage
-            .sstore(self.token_address, slot, amount)
-            .expect("TODO: handle error");
+        self.storage.sstore(self.token_address, slot, amount)
     }
 
-    fn set_total_supply(&mut self, amount: U256) {
+    fn set_total_supply(&mut self, amount: U256) -> Result<(), TempoPrecompileError> {
         self.storage
             .sstore(self.token_address, slots::TOTAL_SUPPLY, amount)
-            .expect("TODO: handle error");
     }
 
-    pub fn check_role(&mut self, account: &Address, role: B256) -> Result<(), TIP20Error> {
+    pub fn check_role(
+        &mut self,
+        account: &Address,
+        role: B256,
+    ) -> Result<(), TempoPrecompileError> {
         let mut roles = self.get_roles_contract();
-        roles
-            .check_role(account, role)
-            .map_err(|_| TIP20Error::policy_forbids())
+        roles.check_role(account, role)
     }
 
-    pub fn has_role(&mut self, account: &Address, role: B256) -> bool {
+    pub fn has_role(
+        &mut self,
+        account: &Address,
+        role: B256,
+    ) -> Result<bool, TempoPrecompileError> {
         let mut roles = self.get_roles_contract();
         roles.has_role_internal(account, role)
     }
 
-    fn check_not_paused(&mut self) -> Result<(), TIP20Error> {
-        if self.paused() {
-            return Err(TIP20Error::contract_paused());
+    fn check_not_paused(&mut self) -> Result<(), TempoPrecompileError> {
+        if self.paused()? {
+            return Err(TIP20Error::contract_paused().into());
         }
         Ok(())
     }
@@ -910,23 +842,27 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
     }
 
     /// Checks if the transfer is authorized.
-    pub fn is_transfer_authorized(&mut self, from: &Address, to: &Address) -> bool {
-        let transfer_policy_id = self.transfer_policy_id();
+    pub fn is_transfer_authorized(
+        &mut self,
+        from: &Address,
+        to: &Address,
+    ) -> Result<bool, TempoPrecompileError> {
+        let transfer_policy_id = self.transfer_policy_id()?;
         let mut registry = TIP403Registry::new(self.storage);
 
         // Check if 'from' address is authorized
         let from_authorized = registry.is_authorized(ITIP403Registry::isAuthorizedCall {
             policyId: transfer_policy_id,
             user: *from,
-        });
+        })?;
 
         // Check if 'to' address is authorized
         let to_authorized = registry.is_authorized(ITIP403Registry::isAuthorizedCall {
             policyId: transfer_policy_id,
             user: *to,
-        });
+        })?;
 
-        from_authorized && to_authorized
+        Ok(from_authorized && to_authorized)
     }
 
     /// Ensures the transfer is authorized.
@@ -934,68 +870,74 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         &mut self,
         from: &Address,
         to: &Address,
-    ) -> Result<(), TIP20Error> {
-        if !self.is_transfer_authorized(from, to) {
-            return Err(TIP20Error::policy_forbids());
+    ) -> Result<(), TempoPrecompileError> {
+        if !self.is_transfer_authorized(from, to)? {
+            return Err(TIP20Error::policy_forbids().into());
         }
 
         Ok(())
     }
 
-    fn _transfer(&mut self, from: &Address, to: &Address, amount: U256) -> Result<(), TIP20Error> {
-        let from_balance = self.get_balance(from);
+    fn _transfer(
+        &mut self,
+        from: &Address,
+        to: &Address,
+        amount: U256,
+    ) -> Result<(), TempoPrecompileError> {
+        let from_balance = self.get_balance(from)?;
 
         if amount > from_balance {
-            return Err(TIP20Error::insufficient_balance());
+            return Err(TIP20Error::insufficient_balance().into());
         }
 
         let new_from_balance = from_balance
             .checked_sub(amount)
             .ok_or(TIP20Error::insufficient_balance())?;
 
-        self.set_balance(from, new_from_balance);
+        self.set_balance(from, new_from_balance)?;
 
         if *to != Address::ZERO {
-            let to_balance = self.get_balance(to);
+            let to_balance = self.get_balance(to)?;
             let new_to_balance = to_balance
                 .checked_add(amount)
                 .ok_or(TIP20Error::supply_cap_exceeded())?;
-            self.set_balance(to, new_to_balance);
+
+            self.set_balance(to, new_to_balance)?;
         }
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::Transfer(ITIP20::Transfer {
-                    from: *from,
-                    to: *to,
-                    amount,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::Transfer(ITIP20::Transfer {
+                from: *from,
+                to: *to,
+                amount,
+            })
+            .into_log_data(),
+        )
     }
 
     /// Transfers fee tokens from user to fee manager before transaction execution
-    pub fn transfer_fee_pre_tx(&mut self, from: &Address, amount: U256) -> Result<(), TIP20Error> {
-        let from_balance = self.get_balance(from);
+    pub fn transfer_fee_pre_tx(
+        &mut self,
+        from: &Address,
+        amount: U256,
+    ) -> Result<(), TempoPrecompileError> {
+        let from_balance = self.get_balance(from)?;
         if amount > from_balance {
-            return Err(TIP20Error::insufficient_balance());
+            return Err(TIP20Error::insufficient_balance().into());
         }
 
         let new_from_balance = from_balance
             .checked_sub(amount)
             .ok_or(TIP20Error::insufficient_balance())?;
 
-        self.set_balance(from, new_from_balance);
+        self.set_balance(from, new_from_balance)?;
 
-        let to_balance = self.get_balance(&TIP_FEE_MANAGER_ADDRESS);
+        let to_balance = self.get_balance(&TIP_FEE_MANAGER_ADDRESS)?;
         let new_to_balance = to_balance
             .checked_add(amount)
             .ok_or(TIP20Error::supply_cap_exceeded())?;
-        self.set_balance(&TIP_FEE_MANAGER_ADDRESS, new_to_balance);
+        self.set_balance(&TIP_FEE_MANAGER_ADDRESS, new_to_balance)?;
 
         Ok(())
     }
@@ -1006,58 +948,51 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         to: &Address,
         refund: U256,
         actual_used: U256,
-    ) -> Result<(), TIP20Error> {
-        let from_balance = self.get_balance(&TIP_FEE_MANAGER_ADDRESS);
+    ) -> Result<(), TempoPrecompileError> {
+        let from_balance = self.get_balance(&TIP_FEE_MANAGER_ADDRESS)?;
         if refund > from_balance {
-            return Err(TIP20Error::insufficient_balance());
+            return Err(TIP20Error::insufficient_balance().into());
         }
 
         let new_from_balance = from_balance
             .checked_sub(refund)
             .ok_or(TIP20Error::insufficient_balance())?;
 
-        self.set_balance(&TIP_FEE_MANAGER_ADDRESS, new_from_balance);
+        self.set_balance(&TIP_FEE_MANAGER_ADDRESS, new_from_balance)?;
 
-        let to_balance = self.get_balance(to);
+        let to_balance = self.get_balance(to)?;
         let new_to_balance = to_balance
             .checked_add(refund)
             .ok_or(TIP20Error::supply_cap_exceeded())?;
-        self.set_balance(to, new_to_balance);
+        self.set_balance(to, new_to_balance)?;
 
-        self.storage
-            .emit_event(
-                self.token_address,
-                TIP20Event::Transfer(ITIP20::Transfer {
-                    from: *to,
-                    to: TIP_FEE_MANAGER_ADDRESS,
-                    amount: actual_used,
-                })
-                .into_log_data(),
-            )
-            .expect("TODO: handle error");
-
-        Ok(())
+        self.storage.emit_event(
+            self.token_address,
+            TIP20Event::Transfer(ITIP20::Transfer {
+                from: *to,
+                to: TIP_FEE_MANAGER_ADDRESS,
+                amount: actual_used,
+            })
+            .into_log_data(),
+        )
     }
 
-    fn read_string(&mut self, slot: U256) -> String {
-        let value = self
-            .storage
-            .sload(self.token_address, slot)
-            .expect("TODO: handle error");
+    fn read_string(&mut self, slot: U256) -> Result<String, TempoPrecompileError> {
+        let value = self.storage.sload(self.token_address, slot)?;
         let bytes = value.to_be_bytes::<32>();
         let len = bytes[31] as usize / 2; // Last byte stores length * 2 for short strings
         if len > 31 {
             panic!("String too long, we shouldn't have stored this in the first place.");
         } else {
-            String::from_utf8_lossy(&bytes[..len]).to_string()
+            Ok(String::from_utf8_lossy(&bytes[..len]).to_string())
         }
     }
 
     /// Write string to storage (simplified - assumes string fits in one slot)
-    fn write_string(&mut self, slot: U256, value: String) -> Result<(), TIP20Error> {
+    fn write_string(&mut self, slot: U256, value: String) -> Result<(), TempoPrecompileError> {
         let bytes = value.as_bytes();
         if bytes.len() > 31 {
-            return Err(TIP20Error::string_too_long());
+            return Err(TIP20Error::string_too_long().into());
         }
         let mut storage_bytes = [0u8; 32];
         storage_bytes[..bytes.len()].copy_from_slice(bytes);
@@ -1065,8 +1000,6 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
 
         self.storage
             .sstore(self.token_address, slot, U256::from_be_bytes(storage_bytes))
-            .expect("TODO: handle error");
-        Ok(())
     }
 
     fn compute_permit_digest(
@@ -1076,7 +1009,7 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         value: U256,
         nonce: U256,
         deadline: U256,
-    ) -> B256 {
+    ) -> Result<B256, TempoPrecompileError> {
         // Build EIP-712 struct hash for Permit
         let struct_hash = ITIP20::Permit {
             owner,
@@ -1091,9 +1024,9 @@ impl<'a, S: PrecompileStorageProvider> TIP20Token<'a, S> {
         let mut digest_data = [0u8; 66];
         digest_data[0] = 0x19;
         digest_data[1] = 0x01;
-        digest_data[2..34].copy_from_slice(self.domain_separator().as_slice());
+        digest_data[2..34].copy_from_slice(self.domain_separator()?.as_slice());
         digest_data[34..66].copy_from_slice(struct_hash.as_slice());
-        keccak256(digest_data)
+        Ok(keccak256(digest_data))
     }
 }
 
@@ -1174,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn test_permit_sets_allowance_and_increments_nonce() {
+    fn test_permit_sets_allowance_and_increments_nonce() -> eyre::Result<()> {
         // Setup token
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::from([0u8; 20]);
@@ -1217,7 +1150,7 @@ mod tests {
         .eip712_hash_struct();
 
         // Build digest per EIP-191
-        let domain = token.domain_separator();
+        let domain = token.domain_separator()?;
         let mut digest_data = [0u8; 66];
         digest_data[0] = 0x19;
         digest_data[1] = 0x01;
@@ -1248,16 +1181,18 @@ mod tests {
             .unwrap();
 
         // Effects: allowance set and nonce incremented
-        assert_eq!(token.get_allowance(&owner, &spender), value);
+        assert_eq!(token.get_allowance(&owner, &spender)?, value);
         let nonce_after = token
             .storage
             .sload(token.token_address, nonce_slot)
             .expect("Could not get nonce");
         assert_eq!(nonce_after, U256::ONE);
+
+        Ok(())
     }
 
     #[test]
-    fn test_permit_rejects_invalid_signature() {
+    fn test_permit_rejects_invalid_signature() -> eyre::Result<()> {
         // Setup token
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::from([0u8; 20]);
@@ -1299,7 +1234,7 @@ mod tests {
         }
         .eip712_hash_struct();
 
-        let domain = token.domain_separator();
+        let domain = token.domain_separator()?;
         let mut digest_data = [0u8; 66];
         digest_data[0] = 0x19;
         digest_data[1] = 0x01;
@@ -1326,11 +1261,16 @@ mod tests {
                 s: s.into(),
             },
         );
-        assert!(matches!(result, Err(TIP20Error::InvalidSignature(_))));
+        assert!(matches!(
+            result,
+            Err(TempoPrecompileError::TIP20(TIP20Error::InvalidSignature(_)))
+        ));
+
+        Ok(())
     }
 
     #[test]
-    fn test_mint_increases_balance_and_supply() {
+    fn test_mint_increases_balance_and_supply() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::from([0u8; 20]);
         let addr = Address::from([1u8; 20]);
@@ -1345,14 +1285,14 @@ mod tests {
 
             // Grant issuer role to admin
             let mut roles = token.get_roles_contract();
-            roles.grant_role_internal(&admin, *ISSUER_ROLE);
+            roles.grant_role_internal(&admin, *ISSUER_ROLE)?;
 
             token
                 .mint(&admin, ITIP20::mintCall { to: addr, amount })
                 .unwrap();
 
-            assert_eq!(token.get_balance(&addr), amount);
-            assert_eq!(token.total_supply(), amount);
+            assert_eq!(token.get_balance(&addr)?, amount);
+            assert_eq!(token.total_supply()?, amount);
         }
         assert_eq!(storage.events[&token_id_to_address(token_id)].len(), 2);
         assert_eq!(
@@ -1368,10 +1308,12 @@ mod tests {
             storage.events[&token_id_to_address(token_id)][1],
             TIP20Event::Mint(ITIP20::Mint { to: addr, amount }).into_log_data()
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_transfer_moves_balance() {
+    fn test_transfer_moves_balance() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::from([0u8; 20]);
         let from = Address::from([1u8; 20]);
@@ -1384,7 +1326,7 @@ mod tests {
                 .initialize("Test", "TST", "USD", LINKING_USD_ADDRESS, &admin)
                 .unwrap();
             let mut roles = token.get_roles_contract();
-            roles.grant_role_internal(&admin, *ISSUER_ROLE);
+            roles.grant_role_internal(&admin, *ISSUER_ROLE)?;
 
             token
                 .mint(&admin, ITIP20::mintCall { to: from, amount })
@@ -1393,9 +1335,9 @@ mod tests {
                 .transfer(&from, ITIP20::transferCall { to, amount })
                 .unwrap();
 
-            assert_eq!(token.get_balance(&from), U256::ZERO);
-            assert_eq!(token.get_balance(&to), amount);
-            assert_eq!(token.total_supply(), amount); // Supply unchanged
+            assert_eq!(token.get_balance(&from)?, U256::ZERO);
+            assert_eq!(token.get_balance(&to)?, amount);
+            assert_eq!(token.total_supply()?, amount); // Supply unchanged
         }
         assert_eq!(storage.events[&token_id_to_address(token_id)].len(), 3);
         assert_eq!(
@@ -1415,10 +1357,12 @@ mod tests {
             storage.events[&token_id_to_address(token_id)][2],
             TIP20Event::Transfer(ITIP20::Transfer { from, to, amount }).into_log_data()
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_transfer_insufficient_balance_fails() {
+    fn test_transfer_insufficient_balance_fails() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::from([0u8; 20]);
         let mut token = TIP20Token::new(1, &mut storage);
@@ -1430,11 +1374,18 @@ mod tests {
         let amount = U256::from(100);
 
         let result = token.transfer(&from, ITIP20::transferCall { to, amount });
-        assert!(matches!(result, Err(TIP20Error::InsufficientBalance(_))));
+        assert!(matches!(
+            result,
+            Err(TempoPrecompileError::TIP20(
+                TIP20Error::InsufficientBalance(_)
+            ))
+        ));
+
+        Ok(())
     }
 
     #[test]
-    fn test_mint_with_memo() {
+    fn test_mint_with_memo() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
         let token_id = 1;
@@ -1444,7 +1395,7 @@ mod tests {
             .unwrap();
 
         let mut roles = token.get_roles_contract();
-        roles.grant_role_internal(&admin, *ISSUER_ROLE);
+        roles.grant_role_internal(&admin, *ISSUER_ROLE)?;
 
         let to = Address::random();
         let amount = U256::random();
@@ -1481,10 +1432,12 @@ mod tests {
             })
             .into_log_data()
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_burn_with_memo() {
+    fn test_burn_with_memo() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
         let token_id = 1;
@@ -1494,7 +1447,7 @@ mod tests {
             .unwrap();
 
         let mut roles = token.get_roles_contract();
-        roles.grant_role_internal(&admin, *ISSUER_ROLE);
+        roles.grant_role_internal(&admin, *ISSUER_ROLE)?;
 
         let amount = U256::random();
         let memo = FixedBytes::random();
@@ -1538,10 +1491,12 @@ mod tests {
             })
             .into_log_data()
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_transfer_from_with_memo() {
+    fn test_transfer_from_with_memo() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
         let token_id = 1;
@@ -1551,7 +1506,7 @@ mod tests {
             .unwrap();
 
         let mut roles = token.get_roles_contract();
-        roles.grant_role_internal(&admin, *ISSUER_ROLE);
+        roles.grant_role_internal(&admin, *ISSUER_ROLE)?;
 
         let owner = Address::random();
         let spender = Address::random();
@@ -1603,10 +1558,12 @@ mod tests {
             })
             .into_log_data()
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_transfer_fee_pre_tx() {
+    fn test_transfer_fee_pre_tx() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
         let user = Address::random();
@@ -1617,7 +1574,7 @@ mod tests {
             .unwrap();
 
         let mut roles = token.get_roles_contract();
-        roles.grant_role_internal(&admin, *ISSUER_ROLE);
+        roles.grant_role_internal(&admin, *ISSUER_ROLE)?;
 
         let amount = U256::from(100);
         token
@@ -1629,8 +1586,10 @@ mod tests {
             .transfer_fee_pre_tx(&user, fee_amount)
             .expect("transfer failed");
 
-        assert_eq!(token.get_balance(&user), U256::from(50));
-        assert_eq!(token.get_balance(&TIP_FEE_MANAGER_ADDRESS), fee_amount);
+        assert_eq!(token.get_balance(&user)?, U256::from(50));
+        assert_eq!(token.get_balance(&TIP_FEE_MANAGER_ADDRESS)?, fee_amount);
+
+        Ok(())
     }
 
     #[test]
@@ -1646,11 +1605,16 @@ mod tests {
 
         let fee_amount = U256::from(50);
         let result = token.transfer_fee_pre_tx(&user, fee_amount);
-        assert_eq!(result, Err(TIP20Error::insufficient_balance()));
+        assert_eq!(
+            result,
+            Err(TempoPrecompileError::TIP20(
+                TIP20Error::insufficient_balance()
+            ))
+        );
     }
 
     #[test]
-    fn test_transfer_fee_post_tx() {
+    fn test_transfer_fee_post_tx() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
         let user = Address::random();
@@ -1661,7 +1625,7 @@ mod tests {
             .unwrap();
 
         let initial_fee = U256::from(100);
-        token.set_balance(&TIP_FEE_MANAGER_ADDRESS, initial_fee);
+        token.set_balance(&TIP_FEE_MANAGER_ADDRESS, initial_fee)?;
 
         let refund_amount = U256::from(30);
         let gas_used = U256::from(10);
@@ -1669,8 +1633,8 @@ mod tests {
             .transfer_fee_post_tx(&user, refund_amount, gas_used)
             .expect("transfer failed");
 
-        assert_eq!(token.get_balance(&user), refund_amount);
-        assert_eq!(token.get_balance(&TIP_FEE_MANAGER_ADDRESS), U256::from(70));
+        assert_eq!(token.get_balance(&user)?, refund_amount);
+        assert_eq!(token.get_balance(&TIP_FEE_MANAGER_ADDRESS)?, U256::from(70));
 
         let events = &storage.events[&token_id_to_address(token_id)];
         assert_eq!(
@@ -1682,10 +1646,12 @@ mod tests {
             })
             .into_log_data()
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_transfer_from_insufficient_allowance() {
+    fn test_transfer_from_insufficient_allowance() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
         let from = Address::random();
@@ -1699,18 +1665,25 @@ mod tests {
             .unwrap();
 
         let mut roles = token.get_roles_contract();
-        roles.grant_role_internal(&admin, *ISSUER_ROLE);
+        roles.grant_role_internal(&admin, *ISSUER_ROLE)?;
 
         token
             .mint(&admin, ITIP20::mintCall { to: from, amount })
             .unwrap();
 
         let result = token.transfer_from(&spender, ITIP20::transferFromCall { from, to, amount });
-        assert!(matches!(result, Err(TIP20Error::InsufficientAllowance(_))));
+        assert!(matches!(
+            result,
+            Err(TempoPrecompileError::TIP20(
+                TIP20Error::InsufficientAllowance(_)
+            ))
+        ));
+
+        Ok(())
     }
 
     #[test]
-    fn test_system_transfer_from() {
+    fn test_system_transfer_from() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
         let from = Address::random();
@@ -1723,7 +1696,7 @@ mod tests {
             .unwrap();
 
         let mut roles = token.get_roles_contract();
-        roles.grant_role_internal(&admin, *ISSUER_ROLE);
+        roles.grant_role_internal(&admin, *ISSUER_ROLE)?;
 
         token
             .mint(&admin, ITIP20::mintCall { to: from, amount })
@@ -1736,10 +1709,12 @@ mod tests {
             storage.events[&token_id_to_address(token_id)].last(),
             Some(&TIP20Event::Transfer(ITIP20::Transfer { from, to, amount }).into_log_data())
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_initialize_sets_next_quote_token() {
+    fn test_initialize_sets_next_quote_token() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
 
@@ -1747,12 +1722,14 @@ mod tests {
         let mut token = TIP20Token::new(token_id, &mut storage);
 
         // Verify both quoteToken and nextQuoteToken are set to the same value
-        assert_eq!(token.quote_token(), LINKING_USD_ADDRESS);
-        assert_eq!(token.next_quote_token(), LINKING_USD_ADDRESS);
+        assert_eq!(token.quote_token()?, LINKING_USD_ADDRESS);
+        assert_eq!(token.next_quote_token()?, LINKING_USD_ADDRESS);
+
+        Ok(())
     }
 
     #[test]
-    fn test_update_quote_token() {
+    fn test_update_quote_token() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
 
@@ -1772,7 +1749,7 @@ mod tests {
             .unwrap();
 
         // Verify next quote token was set
-        assert_eq!(token.next_quote_token(), quote_token_address);
+        assert_eq!(token.next_quote_token()?, quote_token_address);
 
         // Verify event was emitted
         let events = &storage.events[&token_id_to_address(token_id)];
@@ -1784,10 +1761,12 @@ mod tests {
             })
             .into_log_data()
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_update_quote_token_requires_admin() {
+    fn test_update_quote_token_requires_admin() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
         let non_admin = Address::random();
@@ -1807,11 +1786,18 @@ mod tests {
             },
         );
 
-        assert!(matches!(result, Err(TIP20Error::PolicyForbids(_))));
+        assert!(matches!(
+            result,
+            Err(TempoPrecompileError::RolesAuthError(
+                RolesAuthError::Unauthorized(_)
+            ))
+        ));
+
+        Ok(())
     }
 
     #[test]
-    fn test_update_quote_token_rejects_non_tip20() {
+    fn test_update_quote_token_rejects_non_tip20() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
 
@@ -1827,11 +1813,18 @@ mod tests {
             },
         );
 
-        assert!(matches!(result, Err(TIP20Error::InvalidQuoteToken(_))));
+        assert!(matches!(
+            result,
+            Err(TempoPrecompileError::TIP20(TIP20Error::InvalidQuoteToken(
+                _
+            )))
+        ));
+
+        Ok(())
     }
 
     #[test]
-    fn test_update_quote_token_rejects_undeployed_token() {
+    fn test_update_quote_token_rejects_undeployed_token() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
 
@@ -1848,11 +1841,18 @@ mod tests {
             },
         );
 
-        assert!(matches!(result, Err(TIP20Error::InvalidQuoteToken(_))));
+        assert!(matches!(
+            result,
+            Err(TempoPrecompileError::TIP20(TIP20Error::InvalidQuoteToken(
+                _
+            )))
+        ));
+
+        Ok(())
     }
 
     #[test]
-    fn test_finalize_quote_token_update() {
+    fn test_finalize_quote_token_update() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
 
@@ -1877,7 +1877,7 @@ mod tests {
             .unwrap();
 
         // Verify quote token was updated
-        assert_eq!(token.quote_token(), quote_token_address);
+        assert_eq!(token.quote_token()?, quote_token_address);
 
         // Verify event was emitted
         let events = &storage.events[&token_id_to_address(token_id)];
@@ -1889,10 +1889,12 @@ mod tests {
             })
             .into_log_data()
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_finalize_quote_token_update_detects_loop() {
+    fn test_finalize_quote_token_update_detects_loop() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
 
@@ -1924,11 +1926,18 @@ mod tests {
         let result =
             token_b.finalize_quote_token_update(&admin, ITIP20::finalizeQuoteTokenUpdateCall {});
 
-        assert!(matches!(result, Err(TIP20Error::InvalidQuoteToken(_))));
+        assert!(matches!(
+            result,
+            Err(TempoPrecompileError::TIP20(TIP20Error::InvalidQuoteToken(
+                _
+            )))
+        ));
+
+        Ok(())
     }
 
     #[test]
-    fn test_finalize_quote_token_update_requires_admin() {
+    fn test_finalize_quote_token_update_requires_admin() -> eyre::Result<()> {
         let mut storage = HashMapStorageProvider::new(1);
         let admin = Address::random();
         let non_admin = Address::random();
@@ -1939,20 +1948,25 @@ mod tests {
         let mut token = TIP20Token::new(token_id, &mut storage);
 
         // Set next quote token as admin
-        token
-            .update_quote_token(
-                &admin,
-                ITIP20::updateQuoteTokenCall {
-                    newQuoteToken: quote_token_address,
-                },
-            )
-            .unwrap();
+        token.update_quote_token(
+            &admin,
+            ITIP20::updateQuoteTokenCall {
+                newQuoteToken: quote_token_address,
+            },
+        )?;
 
         // Try to complete update as non-admin
         let result =
             token.finalize_quote_token_update(&non_admin, ITIP20::finalizeQuoteTokenUpdateCall {});
 
-        assert!(matches!(result, Err(TIP20Error::PolicyForbids(_))));
+        assert!(matches!(
+            result,
+            Err(TempoPrecompileError::RolesAuthError(
+                RolesAuthError::Unauthorized(_)
+            ))
+        ));
+
+        Ok(())
     }
 
     #[test]
