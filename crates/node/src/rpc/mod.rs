@@ -1,7 +1,18 @@
+pub mod amm;
 pub mod dex;
+pub mod eth_ext;
+pub mod policy;
+pub mod token;
 
-pub use dex::TempoDexApiServer;
+mod pagination;
+
+pub use amm::{TempoAmm, TempoAmmApiServer};
+pub use dex::{TempoDex, api::TempoDexApiServer};
+pub use eth_ext::{TempoEthExt, TempoEthExtApiServer};
+pub use pagination::{FilterRange, PaginationParams};
+pub use policy::{TempoPolicy, TempoPolicyApiServer};
 pub use tempo_alloy::rpc::TempoTransactionRequest;
+pub use token::{TempoToken, TempoTokenApiServer};
 
 use crate::node::TempoNode;
 use alloy::{consensus::TxReceipt, primitives::U256};
