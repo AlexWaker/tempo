@@ -18,7 +18,7 @@ use std::{
     fmt::Debug,
     sync::{Arc, OnceLock},
 };
-use tempo_precompiles::{nonce::slots, storage::double_mapping_slot};
+use tempo_precompiles::nonce::NonceManager;
 use tempo_primitives::{TempoTxEnvelope, transaction::calc_gas_balance_spending};
 use thiserror::Error;
 
@@ -79,11 +79,7 @@ impl TempoPooledTransaction {
         *self.nonce_key_slot.get_or_init(|| {
             let nonce_key = self.nonce_key()?;
             let sender = self.sender();
-            let slot = double_mapping_slot(
-                sender.as_slice(),
-                nonce_key.to_be_bytes::<32>(),
-                slots::NONCES,
-            );
+            let slot = NonceManager::new().nonces.at(sender).at(nonce_key).slot();
             Some(slot)
         })
     }
